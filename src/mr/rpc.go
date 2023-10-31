@@ -7,8 +7,8 @@ package mr
 //
 
 import (
+	"context"
 	"os"
-	"time"
 )
 import "strconv"
 
@@ -22,14 +22,16 @@ const (
 	TaskAssign
 	TaskComplete
 	Intermediate = "intermediate"
+	PhaseMap     = "Task_phase_map"
+	PhaseReduce  = "Task_phase_reduce"
 )
 
-type ExampleArgs struct {
-	X int
+type UpdateReq struct {
+	WorkerId, TaskId, TaskStatus int
+	Phase                        string
 }
 
-type ExampleReply struct {
-	Y int
+type UpdateResp struct {
 }
 
 // Add your RPC definitions here.
@@ -41,27 +43,45 @@ type AskTaskReq struct {
 
 type AskTaskResp struct {
 	// 0代表map, 1代表reduce
-	TaskCategory int
-	FileName     string
-	MpTask       *MapTask
-	RedTask      *ReduceTask
+	TaskCategory  int
+	FileName      string
+	Task          *Task
+	AllTaskDone   bool
+	ctx           context.Context
+	ctxCancelFunc context.CancelFunc
+	//MpTask       *MapTask
+	//RedTask      *ReduceTask
+}
+
+type Task struct {
+	File              string
+	Phase             string
+	Status, ReduceNum int
+	TaskId, WorkerId  int
+	FilesName         []string
+}
+
+/*
+type ParentTask struct {
+	TaskId, WorkerId int
+	TaskStatus       int
+	timer            *time.Timer
+	ctx              context.Context
+	ctxFunc          context.CancelFunc
 }
 
 // MapTask map任务通过文件划分
 type MapTask struct {
-	TaskId     int
-	FileName   string
-	TaskStatus int
-	timer      *time.Timer
+	FileName string
+	NReduce  int
+	ParentTask
 }
 
 // ReduceTask 分发reduce任务, 每个任务处理
 type ReduceTask struct {
-	TaskId                 int
-	TaskStatus             int
 	TargetIntermediateFile []string
-	timer                  *time.Timer
-}
+	ParentTask
+}*/
 
 // Cook up a unique-ish UNIX-domain socket name
 // in /var/tmp, for the coordinator.
