@@ -15,7 +15,7 @@ import "net/http"
 type Coordinator struct {
 	// Your definitions here.
 	Tasks           []*Task
-	wgMap, wgReduce sync.WaitGroup
+	WgMap, WgReduce sync.WaitGroup
 	RwMutex         sync.RWMutex
 	AllDone         bool
 	Ctx             context.Context
@@ -43,9 +43,9 @@ func (c *Coordinator) RegisterUpdateTaskStatus(req *UpdateReq, resp *UpdateResp)
 		task.Status = req.TaskStatus
 		if req.TaskStatus == TaskComplete {
 			if req.Phase == PhaseMap {
-				c.wgMap.Done()
+				c.WgMap.Done()
 			} else {
-				c.wgReduce.Done()
+				c.WgReduce.Done()
 			}
 		}
 	}
@@ -66,9 +66,9 @@ func (c *Coordinator) RegisterAskTask(req *AskTaskReq, resp *AskTaskResp) error 
 			continue
 		}
 
-		task.Status, task.WorkerId = TaskAssign, req.workerId
+		task.Status, task.WorkerId = TaskAssign, req.WorkerId
 		resp.Task = task
-		resp.ctx, resp.ctxCancelFunc = context.WithTimeout(context.Background(), 10*time.Second)
+		resp.Ctx, resp.CtxCancelFunc = context.WithTimeout(context.Background(), 10*time.Second)
 	}
 	return nil
 }
@@ -97,7 +97,7 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	c.Tasks = make([]*Task, 0, len(files))
 
 	//此时是等待map完成
-	c.wgMap.Add(len(files))
+	c.WgMap.Add(len(files))
 	go func() {
 		c.RwMutex.Lock()
 		defer c.RwMutex.Unlock()
@@ -113,10 +113,10 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 		}
 	}()
 
-	c.wgReduce.Add(nReduce)
+	c.WgReduce.Add(nReduce)
 	go func() {
 		// 所有map完成后才可以发放reduce任务
-		c.wgMap.Wait()
+		c.WgMap.Wait()
 
 		c.RwMutex.Lock()
 		defer c.RwMutex.Unlock()
@@ -140,7 +140,7 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	}()
 	// 所有完成的信号
 	go func() {
-		c.wgReduce.Wait()
+		c.WgReduce.Wait()
 		c.RwMutex.Lock()
 		defer c.RwMutex.Unlock()
 		c.AllDone = true

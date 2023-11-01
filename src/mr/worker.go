@@ -52,7 +52,7 @@ func Worker(mapf func(string, string) []KeyValue,
 				}
 				CallUpdateTaskChan(task.TaskId, TaskComplete, PhaseMap)
 			}
-		}(taskResp.Task, taskResp.ctx, taskResp.ctxCancelFunc)
+		}(taskResp.Task, taskResp.Ctx, taskResp.CtxCancelFunc)
 	}
 }
 
@@ -73,7 +73,7 @@ func CallUpdateTaskChan(taskId, status int, phase string) {
 func CallAskTask() *AskTaskResp {
 	// 取出task
 	req := AskTaskReq{}
-	req.workerId = os.Getpid()
+	req.WorkerId = os.Getpid()
 	resp := AskTaskResp{}
 	ok := call("Coordinate.RegisterAskTask", &req, &resp)
 	if !ok {

@@ -37,8 +37,8 @@ type UpdateResp struct {
 // Add your RPC definitions here.
 type AskTaskReq struct {
 	// 0代表map, 1代表reduce
-	taskCategory int
-	workerId     int
+	TaskCategory int
+	WorkerId     int
 }
 
 type AskTaskResp struct {
@@ -47,8 +47,8 @@ type AskTaskResp struct {
 	FileName      string
 	Task          *Task
 	AllTaskDone   bool
-	ctx           context.Context
-	ctxCancelFunc context.CancelFunc
+	Ctx           context.Context
+	CtxCancelFunc context.CancelFunc
 	//MpTask       *MapTask
 	//RedTask      *ReduceTask
 }
@@ -66,7 +66,7 @@ type ParentTask struct {
 	TaskId, WorkerId int
 	TaskStatus       int
 	timer            *time.Timer
-	ctx              context.Context
+	Ctx              context.Context
 	ctxFunc          context.CancelFunc
 }
 
