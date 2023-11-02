@@ -1,7 +1,6 @@
 package mr
 
 import (
-	"context"
 	"fmt"
 	"log"
 	"sync"
@@ -18,8 +17,6 @@ type Coordinator struct {
 	WgMap, WgReduce sync.WaitGroup
 	RwMutex         sync.RWMutex
 	AllDone         bool
-	Ctx             context.Context
-	CtxFunc         context.CancelFunc
 }
 
 // main/mrcoordinator.go calls Done() periodically to find out
@@ -43,8 +40,10 @@ func (c *Coordinator) RegisterUpdateTaskStatus(req *UpdateReq, resp *UpdateResp)
 		task.Status = req.TaskStatus
 		if req.TaskStatus == TaskComplete {
 			if req.Phase == PhaseMap {
+				log.Println("map任务完成一个")
 				c.WgMap.Done()
 			} else {
+				log.Println("reduce任务完成一个")
 				c.WgReduce.Done()
 			}
 		}
@@ -58,6 +57,7 @@ func (c *Coordinator) RegisterAskTask(req *AskTaskReq, resp *AskTaskResp) error 
 	defer c.RwMutex.Unlock()
 	if c.AllDone {
 		resp.AllTaskDone = true
+		log.Println("所有任务已经完成, 在coordinate中向worker发送allTaskDone = True")
 		return nil
 	}
 
@@ -68,7 +68,19 @@ func (c *Coordinator) RegisterAskTask(req *AskTaskReq, resp *AskTaskResp) error 
 
 		task.Status, task.WorkerId = TaskAssign, req.WorkerId
 		resp.Task = task
-		resp.Ctx, resp.CtxCancelFunc = context.WithTimeout(context.Background(), 10*time.Second)
+		if task.timer != nil {
+			task.timer.Stop()
+			task.timer = nil
+		}
+		// TODO: 尝试切换RPC, 以实现与context类似的定时结束任务的方法
+		task.timer = time.AfterFunc(10*time.Second, func() {
+			c.RwMutex.Lock()
+			defer c.RwMutex.Unlock()
+			if task.Status != TaskComplete {
+				task.Status = TaskInit
+			}
+		})
+		return nil
 	}
 	return nil
 }
@@ -98,6 +110,10 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 
 	//此时是等待map完成
 	c.WgMap.Add(len(files))
+	log.Println("添加了", len(files), "map个任务")
+	c.WgReduce.Add(nReduce)
+	log.Println("添加了", nReduce, "reduce个任务")
+
 	go func() {
 		c.RwMutex.Lock()
 		defer c.RwMutex.Unlock()
@@ -113,20 +129,21 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 		}
 	}()
 
-	c.WgReduce.Add(nReduce)
 	go func() {
 		// 所有map完成后才可以发放reduce任务
+		log.Println("开始等待所有map完成...")
 		c.WgMap.Wait()
+		log.Println("所有map已经完成...")
 
 		c.RwMutex.Lock()
 		defer c.RwMutex.Unlock()
 
 		c.Tasks = make([]*Task, 0, nReduce)
 		for i := 0; i < nReduce; i++ {
-			intermediatesNames := make([]string, len(files))
+			intermediatesNames := make([]string, 0, len(files))
 			for j := 0; j < len(files); j++ {
 				// 拼接中间文件名字, intermediate-fileID-reduceID
-				intermediatesNames = append(intermediatesNames, fmt.Sprintf("%s-%d-%d", Intermediate, j, i))
+				intermediatesNames = append(intermediatesNames, fmt.Sprintf("%s-%d-%d", IntermediaFileNamePrefix, j, i))
 			}
 			c.Tasks = append(c.Tasks, &Task{
 				TaskId:    i,
@@ -140,7 +157,9 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	}()
 	// 所有完成的信号
 	go func() {
+		log.Println("开始等待所有reduce完成...")
 		c.WgReduce.Wait()
+		log.Println("所有reduce已完成...")
 		c.RwMutex.Lock()
 		defer c.RwMutex.Unlock()
 		c.AllDone = true

@@ -9,6 +9,7 @@ package mr
 import (
 	"context"
 	"os"
+	"time"
 )
 import "strconv"
 
@@ -21,9 +22,10 @@ const (
 	TaskInit = iota
 	TaskAssign
 	TaskComplete
-	Intermediate = "intermediate"
-	PhaseMap     = "Task_phase_map"
-	PhaseReduce  = "Task_phase_reduce"
+	PhaseMap    = "Task_phase_map"
+	PhaseReduce = "Task_phase_reduce"
+
+	IntermediaFileNamePrefix = "mr-mid"
 )
 
 type UpdateReq struct {
@@ -58,6 +60,7 @@ type Task struct {
 	Phase             string
 	Status, ReduceNum int
 	TaskId, WorkerId  int
+	timer             *time.Timer
 	FilesName         []string
 }
 
@@ -65,7 +68,7 @@ type Task struct {
 type ParentTask struct {
 	TaskId, WorkerId int
 	TaskStatus       int
-	timer            *time.Timer
+	Timer            *time.Timer
 	Ctx              context.Context
 	ctxFunc          context.CancelFunc
 }

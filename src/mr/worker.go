@@ -1,7 +1,6 @@
 package mr
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -29,30 +28,35 @@ func ihash(key string) int {
 // main/mrworker.go calls this function.
 func Worker(mapf func(string, string) []KeyValue,
 	reducef func(string, []string) string) {
+	idx := 0
 	for {
+		log.Printf("开始执行第%d次worker任务\n", idx)
+		idx++
 		taskResp := CallAskTask()
 		if taskResp == nil || taskResp.Task == nil {
+			if taskResp.AllTaskDone {
+				log.Printf("所有的任务都做完了, break掉\n")
+				break
+			}
+			if taskResp == nil {
+				log.Println("taskResp是空的")
+			} else {
+				log.Println("taskResp.Task是空的")
+			}
+			log.Printf("因为call调用得到空值所以提前结束\n")
 			continue
 		}
-		if taskResp.AllTaskDone {
-			break
-		}
-		go func(task *Task, ctx context.Context, cancelFunc context.CancelFunc) {
-			defer cancelFunc()
-			select {
-			case <-ctx.Done():
-				//	任务超时
-				CallUpdateTaskChan(task.TaskId, TaskInit, task.Phase)
-			default:
-				switch task.Phase {
-				case PhaseMap:
-					HandleMapTask(task, mapf)
-				case PhaseReduce:
-					HandleReduceTask(task, reducef)
-				}
-				CallUpdateTaskChan(task.TaskId, TaskComplete, PhaseMap)
+		go func(task *Task) {
+			switch task.Phase {
+			case PhaseMap:
+				HandleMapTask(task, mapf)
+			case PhaseReduce:
+				HandleReduceTask(task, reducef)
 			}
-		}(taskResp.Task, taskResp.Ctx, taskResp.CtxCancelFunc)
+			log.Println("实际上已经执行完任务, 开始尝试状态更新...")
+			CallUpdateTaskChan(task.TaskId, TaskComplete, task.Phase)
+			log.Printf("更新了%v人物的状态", task.Phase)
+		}(taskResp.Task)
 	}
 }
 
@@ -64,7 +68,7 @@ func CallUpdateTaskChan(taskId, status int, phase string) {
 		TaskStatus: status,
 		WorkerId:   os.Getpid(),
 	}
-	ok := call("Coordinate.RegisterUpdateTaskStatus", &req, &UpdateResp{})
+	ok := call("Coordinator.RegisterUpdateTaskStatus", &req, &UpdateResp{})
 	if !ok {
 		fmt.Printf("更新任务状态时调用rpc失败")
 	}
@@ -75,9 +79,9 @@ func CallAskTask() *AskTaskResp {
 	req := AskTaskReq{}
 	req.WorkerId = os.Getpid()
 	resp := AskTaskResp{}
-	ok := call("Coordinate.RegisterAskTask", &req, &resp)
+	ok := call("Coordinator.RegisterAskTask", &req, &resp)
 	if !ok {
-		fmt.Printf("调用rpc失败")
+		fmt.Printf("请求任务时调用rpc失败...")
 	}
 	return &resp
 }
@@ -91,7 +95,7 @@ func call(rpcname string, args interface{}, reply interface{}) bool {
 	sockname := coordinatorSock()
 	c, err := rpc.DialHTTP("unix", sockname)
 	if err != nil {
-		log.Fatal("dialing:", err)
+		log.Fatalf("dialing:%v \n", err)
 	}
 	defer c.Close()
 
@@ -100,7 +104,7 @@ func call(rpcname string, args interface{}, reply interface{}) bool {
 		return true
 	}
 
-	fmt.Println(err)
+	fmt.Printf("call function error: %v", err)
 	return false
 }
 
@@ -128,14 +132,13 @@ func HandleMapTask(task *Task, mapf func(string, string) []KeyValue) {
 	// 分区
 	for i := 0; i < nReduce; i++ {
 		//创建中间文件
-		currName := fmt.Sprintf("mr-%d-%d", task.TaskId, i)
+		currName := fmt.Sprintf("%s-%d-%d", IntermediaFileNamePrefix, task.TaskId, i)
 		currFile, err := os.Create(currName)
 		if err != nil {
 			log.Fatalf("创建文件map中间结果, %s时失败, %v", currName, err)
 		}
 		// 向文件中写入encode数据的文件句柄 的容器
 		encoderRes = append(encoderRes, json.NewEncoder(currFile))
-		currFile.Close()
 	}
 	for _, kv := range KvRes {
 		// 根据hash值向中间文件中写入结果
@@ -153,7 +156,9 @@ func HandleReduceTask(task *Task, reducef func(string, []string) string) {
 	for _, currName := range files {
 		currFile, err := os.Open(currName)
 		if err != nil {
-			log.Fatalf("中间文件%s打开失败, 可能是不存在", currName)
+			log.Println("因为中间文件打开会失败, 这里打印下所有中间文件名")
+			log.Println(files)
+			log.Fatalf("中间文件{%s}打开失败, 可能是不存在", currName)
 		}
 		dec := json.NewDecoder(currFile)
 		kv := KeyValue{}

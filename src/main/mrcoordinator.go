@@ -9,7 +9,10 @@ package main
 // Please do not change this file.
 //
 
-import "6.5840/mr"
+import (
+	"6.5840/mr"
+	"log"
+)
 import "time"
 import "os"
 import "fmt"
@@ -21,6 +24,7 @@ func main() {
 	}
 
 	m := mr.MakeCoordinator(os.Args[1:], 10)
+	log.Println("文件名是\n", os.Args[1:])
 	for m.Done() == false {
 		time.Sleep(time.Second)
 	}
