@@ -3,13 +3,14 @@ package mr
 import (
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"io"
+	"log"
+	"net/rpc"
 	"os"
 	"sort"
+	"time"
 )
-import "log"
-import "net/rpc"
-import "hash/fnv"
 
 // Map functions return a slice of KeyValue.
 type KeyValue struct {
@@ -25,38 +26,50 @@ func ihash(key string) int {
 	return int(h.Sum32() & 0x7fffffff)
 }
 
+func CallIsDone() bool {
+	time.Sleep(500 * time.Millisecond)
+	resp := DoneResp{}
+	ok := call("Coordinator.IsDone", &DoneReq{}, &resp)
+	if !ok {
+		fmt.Printf("查看所有任务是否完成时失败...")
+	}
+	return resp.Done
+}
+
 // main/mrworker.go calls this function.
 func Worker(mapf func(string, string) []KeyValue,
 	reducef func(string, []string) string) {
 	idx := 0
-	for {
-		log.Printf("开始执行第%d次worker任务\n", idx)
+	for !CallIsDone() {
+		//log.Printf("开始执行第%d次worker任务\n", idx)
 		idx++
 		taskResp := CallAskTask()
 		if taskResp == nil || taskResp.Task == nil {
-			if taskResp.AllTaskDone {
-				log.Printf("所有的任务都做完了, break掉\n")
-				break
-			}
-			if taskResp == nil {
-				log.Println("taskResp是空的")
-			} else {
-				log.Println("taskResp.Task是空的")
-			}
-			log.Printf("因为call调用得到空值所以提前结束\n")
+			//if taskResp.AllTaskDone {
+			//	log.Printf("所有的任务都做完了, break掉\n")
+			//	break
+			//}
+			//if taskResp == nil {
+			//	log.Println("taskResp是空的")
+			//} else {
+			//	log.Println("taskResp.Task是空的")
+			//}
+			//log.Printf("因为call调用得到空值所以提前结束\n")
 			continue
 		}
-		go func(task *Task) {
-			switch task.Phase {
-			case PhaseMap:
-				HandleMapTask(task, mapf)
-			case PhaseReduce:
-				HandleReduceTask(task, reducef)
-			}
-			log.Println("实际上已经执行完任务, 开始尝试状态更新...")
-			CallUpdateTaskChan(task.TaskId, TaskComplete, task.Phase)
-			log.Printf("更新了%v人物的状态", task.Phase)
-		}(taskResp.Task)
+		ta := taskResp.Task
+		//go func(task *Task) {
+		// 启动协程会导致worker启动多个协程执行map, 每个协程执行时会同时操作一个文件
+		switch ta.Phase {
+		case PhaseMap:
+			HandleMapTask(ta, mapf)
+		case PhaseReduce:
+			HandleReduceTask(ta, reducef)
+		}
+		//log.Println("实际上已经执行完任务, 开始尝试状态更新...")
+		CallUpdateTaskChan(ta.TaskId, TaskComplete, ta.Phase)
+		//log.Printf("更新了%v人物的状态", task.Phase)
+		//}(taskResp.Task)
 	}
 }
 
@@ -153,6 +166,8 @@ func HandleReduceTask(task *Task, reducef func(string, []string) string) {
 	files := task.FilesName
 	nFiles := len(files)
 	intermediate := make([]KeyValue, 0, nFiles)
+	//log.Printf("当前worker%d处理reduce, 这里打印下所有中间文件名,%v\n", task.WorkerId, files)
+	//log.Println(files)
 	for _, currName := range files {
 		currFile, err := os.Open(currName)
 		if err != nil {
@@ -172,7 +187,6 @@ func HandleReduceTask(task *Task, reducef func(string, []string) string) {
 			kv := kv
 			intermediate = append(intermediate, kv)
 		}
-		intermediate = append(intermediate)
 	}
 	sort.Slice(intermediate, func(i, j int) bool {
 		return intermediate[i].Key < intermediate[j].Key
@@ -181,13 +195,14 @@ func HandleReduceTask(task *Task, reducef func(string, []string) string) {
 	oname := fmt.Sprintf("mr-out-%d", task.TaskId)
 	ofile, err := os.Create(oname)
 	defer ofile.Close()
+
 	if err != nil {
 		log.Fatalf("创建文件%s时出现问题: %e", oname, err)
 	}
 
-	for i := 0; i < nFiles; i++ {
+	for i := 0; i < len(intermediate); {
 		j := i + 1
-		for j < nFiles && intermediate[j].Key == intermediate[i].Key {
+		for j < len(intermediate) && intermediate[j].Key == intermediate[i].Key {
 			j++
 		}
 		values := []string{}

@@ -9,9 +9,9 @@ package mr
 import (
 	"context"
 	"os"
+	"strconv"
 	"time"
 )
-import "strconv"
 
 //
 // example to show how to declare the arguments
@@ -27,6 +27,13 @@ const (
 
 	IntermediaFileNamePrefix = "mr-mid"
 )
+
+type DoneReq struct {
+}
+
+type DoneResp struct {
+	Done bool
+}
 
 type UpdateReq struct {
 	WorkerId, TaskId, TaskStatus int

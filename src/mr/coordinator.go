@@ -3,13 +3,13 @@ package mr
 import (
 	"fmt"
 	"log"
+	"net"
+	"net/http"
+	"net/rpc"
+	"os"
 	"sync"
 	"time"
 )
-import "net"
-import "os"
-import "net/rpc"
-import "net/http"
 
 type Coordinator struct {
 	// Your definitions here.
@@ -22,8 +22,8 @@ type Coordinator struct {
 // main/mrcoordinator.go calls Done() periodically to find out
 // if the entire job has finished.
 func (c *Coordinator) Done() bool {
-	c.RwMutex.Lock()
-	defer c.RwMutex.Unlock()
+	c.RwMutex.RLock()
+	defer c.RwMutex.RUnlock()
 	return c.AllDone
 }
 
@@ -40,10 +40,10 @@ func (c *Coordinator) RegisterUpdateTaskStatus(req *UpdateReq, resp *UpdateResp)
 		task.Status = req.TaskStatus
 		if req.TaskStatus == TaskComplete {
 			if req.Phase == PhaseMap {
-				log.Println("map任务完成一个")
+				//log.Println("map任务完成一个")
 				c.WgMap.Done()
 			} else {
-				log.Println("reduce任务完成一个")
+				//log.Println("reduce任务完成一个")
 				c.WgReduce.Done()
 			}
 		}
@@ -51,21 +51,26 @@ func (c *Coordinator) RegisterUpdateTaskStatus(req *UpdateReq, resp *UpdateResp)
 	return nil
 }
 
+func (c *Coordinator) IsDone(req *DoneReq, resp *DoneResp) error {
+	c.RwMutex.RLock()
+	defer c.RwMutex.RUnlock()
+	resp.Done = c.AllDone
+	return nil
+}
+
 // RegisterAskTask 等待被worker远程调用
 func (c *Coordinator) RegisterAskTask(req *AskTaskReq, resp *AskTaskResp) error {
 	c.RwMutex.Lock()
 	defer c.RwMutex.Unlock()
-	if c.AllDone {
-		resp.AllTaskDone = true
-		log.Println("所有任务已经完成, 在coordinate中向worker发送allTaskDone = True")
-		return nil
-	}
-
+	//if c.AllDone {
+	//	resp.AllTaskDone = true
+	//	log.Println("所有任务已经完成, 在coordinate中向worker发送allTaskDone = True")
+	//	return nil
+	//}
 	for _, task := range c.Tasks {
 		if task.Status != TaskInit {
 			continue
 		}
-
 		task.Status, task.WorkerId = TaskAssign, req.WorkerId
 		resp.Task = task
 		if task.timer != nil {
@@ -131,9 +136,9 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 
 	go func() {
 		// 所有map完成后才可以发放reduce任务
-		log.Println("开始等待所有map完成...")
+		//log.Println("开始等待所有map完成...")
 		c.WgMap.Wait()
-		log.Println("所有map已经完成...")
+		//log.Println("所有map已经完成...")
 
 		c.RwMutex.Lock()
 		defer c.RwMutex.Unlock()
@@ -142,7 +147,7 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 		for i := 0; i < nReduce; i++ {
 			intermediatesNames := make([]string, 0, len(files))
 			for j := 0; j < len(files); j++ {
-				// 拼接中间文件名字, intermediate-fileID-reduceID
+				// 拼接中间文件名字, intermediate-fileID-reduceID, 这里的目的是让reduce去读取每个map生成的第i个中间文件
 				intermediatesNames = append(intermediatesNames, fmt.Sprintf("%s-%d-%d", IntermediaFileNamePrefix, j, i))
 			}
 			c.Tasks = append(c.Tasks, &Task{
@@ -157,9 +162,9 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	}()
 	// 所有完成的信号
 	go func() {
-		log.Println("开始等待所有reduce完成...")
+		//log.Println("开始等待所有reduce完成...")
 		c.WgReduce.Wait()
-		log.Println("所有reduce已完成...")
+		//log.Println("所有reduce已完成...")
 		c.RwMutex.Lock()
 		defer c.RwMutex.Unlock()
 		c.AllDone = true
